@@ -411,6 +411,336 @@ Cloud RunやKubernetesのようなコンテナオーケストレーション環�
 
 適切な設定と監視体制を整えることで、複数インスタンス環境でも信頼性の高いPub/Subアプリケーションを運用できます。
 
+## 8. イベント発行失敗時の対策
+
+Pub/Subへのイベント発行が失敗した場合、重要なイベントが失われる可能性があります。以下の対策を実装することでシステムの信頼性を向上させることができます。
+
+### アウトボックスパターン
+
+データベーストランザクションとイベント発行を確実に行うためのパターンです。
+
+```typescript
+async function createTaskWithEvent(taskData: CreateTaskDto): Promise<Task> {
+  // トランザクション内でタスク作成とイベント記録を行う
+  return prisma.$transaction(async tx => {
+    // 1. タスクをデータベースに保存
+    const task = await tx.task.create({
+      data: {
+        ...taskData,
+      },
+    });
+
+    // 2. 発行予定のイベントをoutboxテーブルに記録
+    await tx.outboxEvent.create({
+      data: {
+        eventType: 'TASK_CREATED',
+        payload: JSON.stringify({
+          taskId: task.id,
+          task: task,
+          timestamp: new Date().toISOString(),
+        }),
+        status: 'PENDING',
+      },
+    });
+
+    return task;
+  });
+}
+```
+
+### デッドレターキュー
+
+処理に失敗したメッセージを保存して後で分析・再処理するための仕組みです。
+
+```typescript
+const [subscription] = await topic.createSubscription(subscriptionName, {
+  deadLetterPolicy: {
+    deadLetterTopic: pubsub.topic('task-events-dead-letter'),
+    maxDeliveryAttempts: 5,
+  },
+});
+```
+
+### サーキットブレーカーパターン
+
+Pub/Subサービスに問題がある場合に一時的にイベント発行を停止し、システムリソースを保護するパターンです。
+
+```typescript
+class PubSubCircuitBreaker {
+  private failureCount = 0;
+  private readonly threshold = 5;
+  private isOpen = false;
+  private lastFailureTime = 0;
+  private readonly resetTimeoutMs = 30000; // 30秒
+
+  async publishWithCircuitBreaker<T>(topic: Topic, data: T): Promise<string | null> {
+    // サーキットが開いている場合
+    if (this.isOpen) {
+      // リセット時間を経過しているか確認
+      if (Date.now() - this.lastFailureTime > this.resetTimeoutMs) {
+        this.isOpen = false;
+        this.failureCount = 0;
+      } else {
+        logger.warn('サーキットブレーカーが開いています。イベント発行をスキップします。');
+        return null;
+      }
+    }
+
+    try {
+      const dataBuffer = Buffer.from(JSON.stringify(data));
+      const messageId = await topic.publish(dataBuffer);
+      // 成功したらカウンタをリセット
+      this.failureCount = 0;
+      return messageId;
+    } catch (error) {
+      this.failureCount++;
+      this.lastFailureTime = Date.now();
+
+      // 失敗回数がしきい値を超えた場合、サーキットを開く
+      if (this.failureCount >= this.threshold) {
+        this.isOpen = true;
+        logger.error('Pub/Sub接続の問題が検出されました。サーキットブレーカーを開きます。');
+      }
+
+      throw error;
+    }
+  }
+}
+```
+
+### イベントの優先度付けと再試行メカニズム
+
+重要度に応じたイベント処理と再試行ロジックを実装することで、システムの信頼性を向上させることができます。
+
+```typescript
+// イベント優先度の定義
+enum EventPriority {
+  HIGH = 'high',
+  MEDIUM = 'medium',
+  LOW = 'low',
+}
+
+// 優先度に基づく再試行設定
+const retryConfig = {
+  [EventPriority.HIGH]: {
+    maxAttempts: 10,
+    backoffMs: 1000, // 1秒から指数バックオフ
+  },
+  [EventPriority.MEDIUM]: {
+    maxAttempts: 5,
+    backoffMs: 2000,
+  },
+  [EventPriority.LOW]: {
+    maxAttempts: 3,
+    backoffMs: 5000,
+  },
+};
+
+// 再試行ロジックを備えたイベント発行
+async function publishEventWithRetry<T>(
+  topic: Topic,
+  eventData: T,
+  priority: EventPriority,
+): Promise<string> {
+  const config = retryConfig[priority];
+  let lastError: Error | null = null;
+  let attempt = 0;
+
+  while (attempt < config.maxAttempts) {
+    try {
+      // 通常のイベント発行処理
+      const messageId = await publishEvent(topic, eventData);
+      return messageId;
+    } catch (error) {
+      lastError = error;
+      attempt++;
+
+      if (attempt < config.maxAttempts) {
+        // 指数バックオフで待機時間を計算
+        const delayMs = config.backoffMs * Math.pow(2, attempt - 1);
+        logger.warn(
+          `イベント発行に失敗しました。${delayMs}ms後に再試行します (${attempt}/${config.maxAttempts})`,
+        );
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+
+  // 全ての再試行に失敗した場合
+  logger.error(`イベント発行が${config.maxAttempts}回試行後も失敗しました`, lastError);
+  throw lastError;
+}
+```
+
+## 9. 重複処理防止の詳細実装
+
+Pub/Subの「少なくとも1回の配信」保証に対応するため、より詳細な重複処理防止メカニズムを実装します。
+
+### 一意のイベントIDの生成と管理
+
+各イベントに一意のIDを付与し、処理済みイベントを記録することで重複処理を防止します。
+
+```typescript
+// イベント発行時に一意のIDを生成
+function generateEventId(): string {
+  return `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+}
+
+// イベント発行時にIDを付与
+async function publishTaskCreated(task: Task): Promise<string> {
+  const eventId = generateEventId();
+
+  const eventData: TaskEvent = {
+    eventId,
+    eventType: TaskEventType.TASK_CREATED,
+    taskId: task.id,
+    task: task,
+    timestamp: new Date().toISOString(),
+  };
+
+  return publishEvent(getTopic(PubSubTopic.TASK_CREATED), eventData);
+}
+```
+
+### サブスクライバー側での処理済みイベントチェック
+
+データベースを使って処理済みイベントを記録し、重複処理を防止します。
+
+```typescript
+// 処理済みイベントのチェックと記録
+async function processEventIdempotently(
+  eventId: string,
+  handler: () => Promise<void>,
+): Promise<void> {
+  // トランザクション内で処理済みチェックと処理実行を行う
+  await prisma.$transaction(async tx => {
+    // 処理済みイベントを検索
+    const existingEvent = await tx.processedEvent.findUnique({
+      where: { eventId },
+    });
+
+    // 既に処理済みの場合はスキップ
+    if (existingEvent) {
+      logger.info(`イベントID ${eventId} は既に処理済みです。スキップします。`);
+      return;
+    }
+
+    // イベント処理を実行
+    await handler();
+
+    // 処理済みとして記録
+    await tx.processedEvent.create({
+      data: {
+        eventId,
+        processedAt: new Date(),
+      },
+    });
+  });
+}
+
+// メッセージハンドラーでの使用例
+function handleStatisticsMessage(message: any): void {
+  try {
+    const eventData: TaskEvent = JSON.parse(message.data.toString());
+    const { eventId } = eventData;
+
+    if (!eventId) {
+      logger.warn('イベントIDがありません。処理をスキップします。');
+      message.ack();
+      return;
+    }
+
+    // 冪等性を保証しながらイベント処理
+    processEventIdempotently(eventId, async () => {
+      switch (eventData.eventType) {
+        case TaskEventType.TASK_CREATED:
+          await updateStatisticsForTaskCreated(eventData);
+          break;
+        case TaskEventType.TASK_STATUS_CHANGED:
+          await updateStatisticsForStatusChanged(eventData);
+          break;
+        // 他のイベントタイプの処理...
+      }
+    })
+      .then(() => message.ack())
+      .catch(error => {
+        logger.error('イベント処理エラー:', error);
+        message.nack();
+      });
+  } catch (error) {
+    logger.error('メッセージ処理エラー:', error);
+    message.nack();
+  }
+}
+```
+
+### トランザクション保証によるデータ整合性の確保
+
+データベーストランザクション内で統計情報の更新など一貫性が重要な処理を行います。
+
+```typescript
+// ステータス変更時の統計更新例
+async function updateStatisticsForStatusChanged(eventData: TaskEvent): Promise<void> {
+  const task = eventData.task;
+  const previousStatus = eventData.metadata?.previousStatus as string;
+
+  if (!previousStatus || previousStatus === task.status) {
+    return; // ステータスに変更がない場合は処理しない
+  }
+
+  // トランザクション内で統計情報の更新を行う
+  await prisma.$transaction(async tx => {
+    // 現在の統計情報を取得
+    const stats = await tx.taskStatistics.findUnique({
+      where: { id: 'singleton' },
+    });
+
+    if (!stats) {
+      // 統計レコードが存在しない場合は作成
+      await tx.taskStatistics.create({
+        data: {
+          id: 'singleton',
+          totalTasks: 1,
+          todoCount: task.status === 'TODO' ? 1 : 0,
+          inProgressCount: task.status === 'IN_PROGRESS' ? 1 : 0,
+          doneCount: task.status === 'DONE' ? 1 : 0,
+        },
+      });
+      return;
+    }
+
+    // 前のステータスのカウントを減らし、新しいステータスのカウントを増やす
+    const updateData: any = {};
+
+    // 前のステータスのカウントを減らす
+    if (previousStatus === 'TODO') {
+      updateData.todoCount = { decrement: 1 };
+    } else if (previousStatus === 'IN_PROGRESS') {
+      updateData.inProgressCount = { decrement: 1 };
+    } else if (previousStatus === 'DONE') {
+      updateData.doneCount = { decrement: 1 };
+    }
+
+    // 新しいステータスのカウントを増やす
+    if (task.status === 'TODO') {
+      updateData.todoCount = { increment: 1 };
+    } else if (task.status === 'IN_PROGRESS') {
+      updateData.inProgressCount = { increment: 1 };
+    } else if (task.status === 'DONE') {
+      updateData.doneCount = { increment: 1 };
+    }
+
+    // 統計情報を更新
+    await tx.taskStatistics.update({
+      where: { id: 'singleton' },
+      data: updateData,
+    });
+  });
+}
+```
+
+これらの実装パターンを組み合わせることで、Pub/Subを使ったイベント駆動型アーキテクチャにおける信頼性と一貫性を確保できます。
+
 ## まとめ
 
 Google Cloud Pub/Subを使用したイベント駆動型アーキテクチャは、以下の利点を提供します。

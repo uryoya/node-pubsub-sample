@@ -12,6 +12,12 @@ import {
   TaskPriority,
 } from '../../types';
 import { ApiError, BadRequestError, NotFoundError } from '../middlewares/errorHandler';
+import {
+  publishTaskCreated,
+  publishTaskUpdated,
+  publishTaskDeleted,
+  publishTaskStatusChanged,
+} from '../../pubsub/publishers';
 
 /**
  * タスク作成コントローラー
@@ -31,6 +37,15 @@ export const createTask = async (req: Request, res: Response, next: NextFunction
     });
 
     logger.info(`タスクを作成しました - ID: ${task.id}`);
+
+    // イベント発行: タスク作成
+    try {
+      await publishTaskCreated(task);
+      logger.info(`タスク作成イベントを発行しました - ID: ${task.id}`);
+    } catch (pubsubError) {
+      logger.error(`タスク作成イベント発行に失敗しました - ID: ${task.id}`, pubsubError);
+      // イベント発行の失敗はユーザーには伝えない（非同期処理として扱う）
+    }
 
     // 成功レスポンス
     res.status(201).json({
@@ -195,6 +210,15 @@ export const updateTask = async (req: Request, res: Response, next: NextFunction
 
     logger.info(`タスクを更新しました - ID: ${id}`);
 
+    // イベント発行: タスク更新
+    try {
+      await publishTaskUpdated(updatedTask, existingTask);
+      logger.info(`タスク更新イベントを発行しました - ID: ${id}`);
+    } catch (pubsubError) {
+      logger.error(`タスク更新イベント発行に失敗しました - ID: ${id}`, pubsubError);
+      // イベント発行の失敗はユーザーには伝えない
+    }
+
     // 成功レスポンス
     res.json({
       status: 'success',
@@ -230,6 +254,9 @@ export const updateTaskStatus = async (req: Request, res: Response, next: NextFu
       throw new NotFoundError(`ID: ${id} のタスクが見つかりません`);
     }
 
+    // 前のステータス値を記録
+    const previousStatus = existingTask.status;
+
     // ステータス遷移の検証（必要に応じて）
     // ここではシンプルにするため省略
 
@@ -240,6 +267,17 @@ export const updateTaskStatus = async (req: Request, res: Response, next: NextFu
     });
 
     logger.info(`タスクステータスを更新しました - ID: ${id}, ステータス: ${status}`);
+
+    // イベント発行: タスクステータス変更
+    try {
+      await publishTaskStatusChanged(updatedTask, previousStatus);
+      logger.info(
+        `タスクステータス変更イベントを発行しました - ID: ${id}, ${previousStatus} -> ${status}`,
+      );
+    } catch (pubsubError) {
+      logger.error(`タスクステータス変更イベント発行に失敗しました - ID: ${id}`, pubsubError);
+      // イベント発行の失敗はユーザーには伝えない
+    }
 
     // 成功レスポンス
     res.json({
@@ -275,12 +313,24 @@ export const deleteTask = async (req: Request, res: Response, next: NextFunction
       throw new NotFoundError(`ID: ${id} のタスクが見つかりません`);
     }
 
+    // タスク情報のコピーを保持（削除後にイベント発行で使用）
+    const taskToDelete = { ...existingTask };
+
     // タスクの削除
     await prisma.task.delete({
       where: { id },
     });
 
     logger.info(`タスクを削除しました - ID: ${id}`);
+
+    // イベント発行: タスク削除
+    try {
+      await publishTaskDeleted(taskToDelete);
+      logger.info(`タスク削除イベントを発行しました - ID: ${id}`);
+    } catch (pubsubError) {
+      logger.error(`タスク削除イベント発行に失敗しました - ID: ${id}`, pubsubError);
+      // イベント発行の失敗はユーザーには伝えない
+    }
 
     // 成功レスポンス
     res.json({

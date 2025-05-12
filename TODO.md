@@ -114,7 +114,7 @@
 
 ## Cloud Pub/Sub統合
 
-- [ ] Pub/Subエミュレータ接続設定
+- [x] Pub/Subエミュレータ接続設定
 - [ ] Pub/Sub初期化とトピック管理 (src/pubsub/topics/)
   - [ ] 必要なトピックの作成
   - [ ] トピック存在確認と初期化

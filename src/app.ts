@@ -6,6 +6,7 @@ import { config } from './config';
 import { logger } from './utils/logger';
 import { errorHandler, notFoundHandler } from './api/middlewares/errorHandler';
 import apiRoutes from './api/routes';
+import { testPubSubConnection } from './pubsub/client';
 
 // Expressアプリケーションの作成
 const app = express();
@@ -30,6 +31,40 @@ app.use('/api', apiRoutes);
 // ヘルスチェックエンドポイント
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
+});
+
+// Pub/Sub接続テストエンドポイント
+app.get('/pubsub-test', async (req, res) => {
+  try {
+    const isConnected = await testPubSubConnection();
+
+    if (isConnected) {
+      res.json({
+        status: 'success',
+        message: 'Pub/Sub接続テスト成功',
+        connectionDetails: {
+          emulatorHost: config.pubsub.emulatorHost || 'なし（本番環境）',
+          projectId: config.pubsub.projectId,
+        },
+      });
+    } else {
+      res.status(500).json({
+        status: 'error',
+        message: 'Pub/Sub接続テスト失敗',
+        connectionDetails: {
+          emulatorHost: config.pubsub.emulatorHost || 'なし（本番環境）',
+          projectId: config.pubsub.projectId,
+        },
+      });
+    }
+  } catch (error) {
+    logger.error('Pub/Sub接続テストエラー:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Pub/Sub接続テスト中にエラーが発生しました',
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 });
 
 // データベース接続テスト

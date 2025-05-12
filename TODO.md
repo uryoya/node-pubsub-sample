@@ -13,25 +13,30 @@
 ## 実装スケジュールと優先順位
 
 1. **フェーズ1: 開発環境構築** (優先度: 最高)
+
    - Docker Compose設定
    - MySQL & Prisma設定
    - Pub/Subエミュレータ設定
 
 2. **フェーズ2: E2Eテスト作成** (優先度: 最高)
+
    - k6によるE2Eテスト（APIと振る舞いを先に定義）
    - テストデータ準備
 
 3. **フェーズ3: バックエンド基盤実装** (優先度: 高)
+
    - Express.js設定
    - Prismaモデル定義
    - ドメインモデル実装
 
 4. **フェーズ4: API実装** (優先度: 高)
+
    - RESTful API実装
    - バリデーション
    - エラーハンドリング
 
 5. **フェーズ5: Pub/Sub統合** (優先度: 高)
+
    - トピック管理
    - パブリッシャー・サブスクライバー実装
 
@@ -43,10 +48,10 @@
 
 - [x] プロジェクト構造の定義とREADME作成
 - [x] 基本的な開発環境セットアップ (TypeScript, ESLint, Prettier)
-- [ ] Docker Compose設定
-  - [ ] アプリケーションコンテナ定義
-  - [ ] MySQL設定
-  - [ ] Pub/Subエミュレータ設定
+- [x] Docker Compose設定
+  - [x] アプリケーションコンテナ定義
+  - [x] MySQL設定
+  - [x] Pub/Subエミュレータ設定
 - [ ] Prisma ORM設定
   - [ ] スキーマ定義
   - [ ] マイグレーション
@@ -221,7 +226,7 @@ enum TaskEventType {
   TASK_CREATED = 'TASK_CREATED',
   TASK_UPDATED = 'TASK_UPDATED',
   TASK_DELETED = 'TASK_DELETED',
-  TASK_STATUS_CHANGED = 'TASK_STATUS_CHANGED'
+  TASK_STATUS_CHANGED = 'TASK_STATUS_CHANGED',
 }
 ```
 
@@ -235,7 +240,7 @@ services:
   app:
     build: .
     ports:
-      - "3000:3000"
+      - '3000:3000'
     depends_on:
       - mysql
       - pubsub
@@ -255,7 +260,7 @@ services:
       - MYSQL_USER=user
       - MYSQL_PASSWORD=password
     ports:
-      - "3306:3306"
+      - '3306:3306'
     volumes:
       - mysql-data:/var/lib/mysql
 
@@ -263,8 +268,8 @@ services:
     image: gcr.io/google.com/cloudsdktool/cloud-sdk:emulators
     entrypoint: gcloud beta emulators pubsub start --host-port=0.0.0.0:8085
     ports:
-      - "8085:8085"
+      - '8085:8085'
 
 volumes:
   mysql-data:
-``` 
+```

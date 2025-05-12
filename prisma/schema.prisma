@@ -1,0 +1,50 @@
+// schema.prisma
+datasource db {
+    provider = "mysql"
+    url      = env("DATABASE_URL")
+}
+
+generator client {
+    provider = "prisma-client-js"
+}
+
+model Task {
+    id          String       @id @default(uuid())
+    title       String
+    description String?
+    status      TaskStatus   @default(TODO)
+    priority    TaskPriority @default(MEDIUM)
+    dueDate     DateTime?
+    createdAt   DateTime     @default(now())
+    updatedAt   DateTime     @updatedAt
+
+    @@map("tasks")
+}
+
+enum TaskStatus {
+    TODO
+    IN_PROGRESS
+    DONE
+}
+
+enum TaskPriority {
+    LOW
+    MEDIUM
+    HIGH
+}
+
+model TaskStatistics {
+    id              String   @id @default("singleton")
+    totalTasks      Int      @default(0)
+    todoTasks       Int      @default(0)
+    inProgressTasks Int      @default(0)
+    doneTasks       Int      @default(0)
+    lowPriority     Int      @default(0)
+    mediumPriority  Int      @default(0)
+    highPriority    Int      @default(0)
+    createdToday    Int      @default(0)
+    completedToday  Int      @default(0)
+    lastUpdated     DateTime @default(now())
+
+    @@map("task_statistics")
+}

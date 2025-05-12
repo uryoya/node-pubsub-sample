@@ -5,6 +5,7 @@ import { prisma } from './lib/prisma';
 import { config } from './config';
 import { logger } from './utils/logger';
 import { errorHandler, notFoundHandler } from './api/middlewares/errorHandler';
+import apiRoutes from './api/routes';
 
 // Expressアプリケーションの作成
 const app = express();
@@ -23,11 +24,8 @@ if (config.server.isDevelopment) {
   });
 }
 
-// APIルートの設定
-// API設計に応じて後で実装
-app.use('/api', (req, res) => {
-  res.json({ message: 'API endpoint - To be implemented' });
-});
+// APIルーターのマウント
+app.use('/api', apiRoutes);
 
 // ヘルスチェックエンドポイント
 app.get('/health', (req, res) => {

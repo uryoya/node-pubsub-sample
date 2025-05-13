@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import taskRoutes from './taskRoutes';
+import statisticsRoutes from './statisticsRoutes';
 
 const router = Router();
 
@@ -14,5 +15,8 @@ router.get('/health', (req, res) => {
 
 // タスクルーターをマウント
 router.use('/tasks', taskRoutes);
+
+// 統計情報ルーターをマウント
+router.use('/statistics', statisticsRoutes);
 
 export default router;

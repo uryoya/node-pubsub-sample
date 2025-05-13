@@ -333,10 +333,7 @@ export const deleteTask = async (req: Request, res: Response, next: NextFunction
     }
 
     // 成功レスポンス
-    res.json({
-      status: 'success',
-      message: 'タスクが正常に削除されました',
-    });
+    res.status(204).end();
   } catch (error) {
     next(error);
   }

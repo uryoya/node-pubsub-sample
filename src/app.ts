@@ -28,11 +28,6 @@ if (config.server.isDevelopment) {
 // APIルーターのマウント
 app.use('/api', apiRoutes);
 
-// ヘルスチェックエンドポイント
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
-});
-
 // Pub/Sub接続テストエンドポイント
 app.get('/pubsub-test', async (req, res) => {
   try {

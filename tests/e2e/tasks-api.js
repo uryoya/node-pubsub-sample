@@ -40,16 +40,20 @@ export default function () {
   let taskId;
 
   group('ヘルスチェック', () => {
-    const response = http.get(`${baseUrl}/health`);
+    const response = http.get(`${baseUrl}/api/health`);
+    console.log(`ヘルスチェックレスポンス: ${JSON.stringify(response.json())}`);
+
     check(response, {
       ステータスコードは200: r => r.status === 200,
       レスポンスはJSONである: r => r.headers['Content-Type'].includes('application/json'),
-      ステータスはOK: r => r.json('status') === 'ok',
+      ステータスはOK: r => r.json('status') === 'success',
     });
   });
 
   group('データベース接続テスト', () => {
     const response = http.get(`${baseUrl}/db-test`);
+    console.log(`データベース接続テストレスポンス: ${JSON.stringify(response.json())}`);
+
     check(response, {
       ステータスコードは200: r => r.status === 200,
       データベース接続成功: r => r.json('status') === 'Database connection successful',
@@ -73,37 +77,40 @@ export default function () {
     };
 
     const response = http.post(`${baseUrl}/api/tasks`, payload, params);
+    console.log(`タスク作成レスポンス: ${JSON.stringify(response.json())}`);
 
     check(response, {
       ステータスコードは201: r => r.status === 201,
-      タスクが作成された: r => r.json('id') !== undefined,
-      タイトルが正しい: r => r.json('title').includes('テストタスク'),
+      タスクが作成された: r => r.json('data').task.id !== undefined,
+      タイトルが正しい: r => r.json('data').task.title.includes('テストタスク'),
     });
 
     // 作成されたタスクIDを保存
     if (response.status === 201) {
-      taskId = response.json('id');
+      taskId = response.json('data').task.id;
       console.log(`作成されたタスクID: ${taskId}`);
     }
   });
 
   group('タスク一覧取得', () => {
     const response = http.get(`${baseUrl}/api/tasks`, { tags: { name: 'list' } });
+    console.log(`タスク一覧レスポンス: ${JSON.stringify(response.json())}`);
 
     check(response, {
       ステータスコードは200: r => r.status === 200,
-      タスクが配列で返却される: r => Array.isArray(r.json()),
-      タスクが1つ以上ある: r => r.json().length > 0,
+      タスクが配列で返却される: r => Array.isArray(r.json('data').tasks),
+      タスクが1つ以上ある: r => r.json('data').tasks.length > 0,
     });
   });
 
   group('タスク詳細取得', () => {
     if (taskId) {
       const response = http.get(`${baseUrl}/api/tasks/${taskId}`);
+      console.log(`タスク詳細レスポンス: ${JSON.stringify(response.json())}`);
 
       check(response, {
         ステータスコードは200: r => r.status === 200,
-        タスクIDが一致する: r => r.json('id') === taskId,
+        タスクIDが一致する: r => r.json('data').task.id === taskId,
       });
     }
   });
@@ -123,12 +130,13 @@ export default function () {
       };
 
       const response = http.put(`${baseUrl}/api/tasks/${taskId}`, payload, params);
+      console.log(`タスク更新レスポンス: ${JSON.stringify(response.json())}`);
 
       check(response, {
         ステータスコードは200: r => r.status === 200,
-        タスクが更新された: r => r.json('id') === taskId,
-        タイトルが更新された: r => r.json('title').includes('更新されたタスク'),
-        優先度が更新された: r => r.json('priority') === 'HIGH',
+        タスクが更新された: r => r.json('data').task.id === taskId,
+        タイトルが更新された: r => r.json('data').task.title.includes('更新されたタスク'),
+        優先度が更新された: r => r.json('data').task.priority === 'HIGH',
       });
     }
   });
@@ -146,10 +154,11 @@ export default function () {
       };
 
       const response = http.patch(`${baseUrl}/api/tasks/${taskId}/status`, payload, params);
+      console.log(`タスクステータス変更レスポンス: ${JSON.stringify(response.json())}`);
 
       check(response, {
         ステータスコードは200: r => r.status === 200,
-        タスクステータスが更新された: r => r.json('status') === 'IN_PROGRESS',
+        タスクステータスが更新された: r => r.json('data').task.status === 'IN_PROGRESS',
       });
     }
   });
@@ -164,6 +173,8 @@ export default function () {
 
       // 削除後のタスク取得で404が返ることを確認
       const getResponse = http.get(`${baseUrl}/api/tasks/${taskId}`);
+      console.log(`削除後のタスク取得レスポンス: ${JSON.stringify(getResponse.json())}`);
+
       check(getResponse, {
         削除後のタスク取得で404が返る: r => r.status === 404,
       });

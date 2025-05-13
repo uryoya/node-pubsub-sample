@@ -150,6 +150,7 @@ node-pubsub/
 
    ```
    docker-compose up -d
+   docker compose exec app npx prisma db push
    ```
 
 3. APIにアクセス:

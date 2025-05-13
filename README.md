@@ -1,3 +1,7 @@
+以下の内容はCursorによって作成されました。
+
+---
+
 # Node.js モノリスアプリケーション PoC with Cloud Pub/Sub
 
 このプロジェクトは、Node.js、TypeScript、Express.jsフレームワーク、およびGoogle Cloud Pub/Subを使用したモノリスアプリケーションのProof of Concept（PoC）です。
